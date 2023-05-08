@@ -1,0 +1,140 @@
+#loading packages
+library(dplyr)
+library(missForest)
+library(Matrix)
+library(xgboost)
+library(glmnet)
+library(pROC)
+library(CalibrationCurves)
+library(shapviz)
+
+#-----------------------------------------------------#
+# imputation of missing values by missforest          #
+#-----------------------------------------------------#
+#factor type conversion
+x$derilium <- as.factor(x$derilium)
+x$Woman <- as.factor(x$Woman)
+x$Emergency.hospitalization <- as.factor(x$Emergency.hospitalization)
+x$Use.of.ambulance <- as.factor(x$Use.of.ambulance)
+x$Taking.benzodiazepines <- as.factor(x$Taking.benzodiazepines)
+x$Taking.opioid.medications <- as.factor(x$Taking.opioid.medications)
+x$Taking.steroid.medications <- as.factor(x$Taking.steroid.medications)
+x$Dementia <- as.factor(x$Dementia)
+x$Brain.tissue.disorder <- as.factor(x$Brain.tissue.disorder)
+x$Heavy.drinker <- as.factor(x$Heavy.drinker)
+x$History.of.delirium <- as.factor(x$History.of.delirium)
+x$Room.at.hospitalization. <- as.factor(x$Room.at.hospitalization.)
+x$central.venous.port <- as.factor(x$central.venous.port)
+x$swan.ganz.catheter <- as.factor(x$swan.ganz.catheter)
+x$ventilator <- as.factor(x$ventilator)
+x$central.venous.catheter <- as.factor(x$central.venous.catheter)
+x$dialysis.catheter <- as.factor(x$dialysis.catheter)
+x$indwelling.urinary.catheter <- as.factor(x$indwelling.urinary.catheter)
+x$peripheral.vein.catheter <- as.factor(x$peripheral.vein.catheter)
+x$physical.restraint <- as.factor(x$physical.restraint)
+x$circadian.rhythm.problems <- as.factor(x$circadian.rhythm.problems)
+x$surgical.site. <- as.factor(x$surgical.site.)
+
+#applying the missforest function
+set.seed(1)
+imp <- missForest(x)
+
+#-----------------------------------------------------#
+# predictive model development                        #
+#-----------------------------------------------------#
+#loding data
+x=read.csv("●●.csv",fileEncoding='cp932')
+x$obj=x$derilium
+
+#split derivation cohort and validation cohort
+derivation=x %>% filter(training.or.test=="training")
+validation=x %>% filter(training.or.test=="test")
+
+#--------------------------------------#
+# xgboost               　　　         #
+#--------------------------------------#
+#training
+set.seed(1)
+flg<-lapply(derivation,class)=="character"
+derivation[,flg]<-lapply(derivation[,flg],as.factor)
+derivation2<-derivation %>% mutate(obj=as.integer(obj)) %>% ungroup %>% data.frame %>% select(-derilium,-training.or.test)　
+options(na.action = na.pass)
+data2<-model.matrix(obj~.-1,derivation2,contrasts.arg=lapply(derivation2[sapply(derivation2,is.factor)],contrasts,contrasts=FALSE))
+ddat<-xgb.DMatrix(data2, label=as.integer(derivation2$obj))
+tuning<-data.frame()
+for(q in 1:10)
+{print(q)
+  set.seed(q)
+  param<-list(objective="binary:logistic",eval_metric="auc",max.depth=q,eta=0.1)
+  cv<-xgb.cv(param=param,data=ddat,nrounds=500,nfold=10,early_stopping_rounds = 5)
+  testauc<-data.frame(cv$evaluation_log$test_auc_mean[cv$best_iteration],cv$best_iteration) %>% mutate(variable=rownames(.),no=q)
+  tuning<-bind_rows(tuning,testauc)}
+param2<-list(objective="binary:logistic",eval_metric="auc",max.depth=which.max(tuning$cv.evaluation_log.test_auc_mean.cv.best_iteration.),eta=0.1)
+train.GBDT <-xgboost(params=param2, data=ddat, nrounds=tuning$cv.best_iteration[which.max(tuning$cv.evaluation_log.test_auc_mean.cv.best_iteration.)],verbose = 0)
+
+#test
+set.seed(2)
+flg<-lapply(validation,class)=="character"
+validation[,flg]=lapply(validation[,flg],as.factor)
+validation2<-validation %>% mutate(obj=as.integer(obj)) %>% ungroup %>% data.frame %>% select(-derilium,-training.or.test)　
+data3<-model.matrix(obj~.-1,validation2,contrasts.arg=lapply(validation2[sapply(validation2,is.factor)],contrasts,contrasts=FALSE))
+dtest<-xgb.DMatrix(data3, label=as.integer(validation2$obj))
+test.GBDT <- predict(train.GBDT,dtest)
+stats<-val.prob.ci.2(p=roc(validation2$obj,test.GBDT)$predictor,y=roc(validation2$obj,test.GBDT)$response,g=10,CL.BT=T)
+calibration<-data.frame(stats$Calibration)
+AUC<-data.frame(stats$Cindex)
+
+#---------------------------------------------------#
+# shap_Variable importance calculation for xgboost  #
+#---------------------------------------------------#
+#shap value calculation
+shp <- shapviz(train.GBDT, X_pred = data3)
+# A beeswarm plot
+sv_importance(shp, kind = "beeswarm",max_display=20,show_numbers = TRUE)
+# SHAP dependence plots
+sv_dependence(shp, v = "BMI")
+
+#--------------------------------------#
+# LASSO                 　　　         #
+#--------------------------------------#
+#training
+set.seed(1)
+derivation2<-derivation %>% mutate(obj=as.factor(obj)) %>% ungroup %>% data.frame %>% select(-derilium,-training.or.test)
+x <- model.matrix(obj~.,derivation2) 
+#standardization
+x_std<-data.matrix(scale(x)) 
+y <- derivation2$obj
+cvfit <- cv.glmnet(x=x_std, y=y,alpha=1, family="binomial",nfolds = 10, standardize=F)
+train.LASSO <-glmnet(x=x_std, y=y,alpha=1, family="binomial", lambda = cvfit$lambda.min, standardize=F)
+#display standardized regression coefficients
+beta<-data.matrix(train.LASSO$beta)
+
+#test
+set.seed(2)
+flg=lapply(validation,class)=="character"
+validation[,flg]=lapply(validation[,flg],as.factor)
+validation2=validation %>% mutate(obj=as.integer(obj)) %>% ungroup %>% data.frame %>% select(-derilium,-training.or.test)　
+x2 <- model.matrix(obj~.,validation2)　
+#standardization
+x2_std<-data.matrix(scale(x2)) 
+y2 <- validation2$obj
+test.LASSO <- predict(train.LASSO, newx=x2_std,type="response")
+test.LASSO <- as.vector(test.LASSO)
+stats2=val.prob.ci.2(p=roc(validation2$obj,test.LASSO)$predictor,y=roc(validation2$obj,test.LASSO)$response,g=10,CL.BT=T)
+calibration2=data.frame(stats2$Calibration)
+AUC2=data.frame(stats2$Cindex)
+
+#--------------------------------------#
+# ML-referenced LR        　　         #
+#--------------------------------------#
+#training
+set.seed(1)
+train.glm <-glm(obj~Age+vital.sign_Glasgow.Coma.Scale+intensive.care.unit+general.anesthesia.time+amount.of.blood.loss,family=binomial,data=derivation)
+
+#test
+set.seed(2)
+test.glm <- predict(train.glm,validation,type="response")
+test.glm <- as.vector(test.glm)
+stats2=val.prob.ci.2(p=roc(validation$obj,test.glm)$predictor,y=roc(validation$obj,test.glm)$response,g=10,CL.BT=T)
+calibration2=data.frame(stats2$Calibration)
+AUC2=data.frame(stats2$Cindex)
