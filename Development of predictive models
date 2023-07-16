@@ -138,3 +138,57 @@ test.glm <- as.vector(test.glm)
 stats2=val.prob.ci.2(p=roc(validation$obj,test.glm)$predictor,y=roc(validation$obj,test.glm)$response,g=10,CL.BT=T)
 calibration2=data.frame(stats2$Calibration)
 AUC2=data.frame(stats2$Cindex)
+
+#--------------------------------------#
+# Matthews correlation coefficient     #
+#--------------------------------------#
+
+xgboost_p_y<-data.frame(p=roc(validation2$obj,test.GBDT)$predictor,y=roc(validation2$obj,test.GBDT)$response)
+LASSO_p_y<-data.frame(p=roc(validation2$obj,test.LASSO)$predictor,y=roc(validation2$obj,test.LASSO)$response)
+ML_p_y<-data.frame(p=roc(validation$obj,test.glm)$predictor,y=roc(validation$obj,test.glm)$response)
+
+#mcc
+cutoff<-coords(roc(xgboost_p_y$y,xgboost_p_y$p), x="best", ret="all", best.method="youden")
+mcc<-(cutoff$tp*cutoff$tn-cutoff$fp*cutoff$fn)/sqrt((cutoff$tp+cutoff$fp)*(cutoff$tp+cutoff$fn)*(cutoff$tn+cutoff$fp)*(cutoff$tn+cutoff$fn))
+
+#mcc 95%CI
+set.seed(201)
+mcc=vector(length = 2000)
+for(i in 1:2000)
+{
+  print(i)
+  set.seed(i)
+  ind=sample(nrow(xgboost_p_y),nrow(xgboost_p_y),replace=T)
+  val=xgboost_p_y[ind,]
+  cutoff<-coords(roc(val$y,val$p), x="best", ret="all", best.method="youden")
+  mcc[i]<-(cutoff$tp*cutoff$tn-cutoff$fp*cutoff$fn)/sqrt((cutoff$tp+cutoff$fp)*(cutoff$tp+cutoff$fn)*(cutoff$tn+cutoff$fp)*(cutoff$tn+cutoff$fn))
+}
+
+mcc_lower<-quantile(mcc,0.025)
+mcc_upper<-quantile(mcc,0.975)
+
+#--------------------------------------#
+# Brier Score                          #
+#--------------------------------------#
+
+xgboost_p_y<-data.frame(p=roc(validation2$obj,test.GBDT)$predictor,y=roc(validation2$obj,test.GBDT)$response)
+LASSO_p_y<-data.frame(p=roc(validation2$obj,LASSO_p_y)$predictor,y=roc(validation2$obj,LASSO_p_y)$response)
+ML_p_y<-data.frame(p=roc(validation2$obj,test.GBDT)$predictor,y=roc(validation2$obj,test.GBDT)$response)
+
+#BS
+BS<-mean((xgboost_p_y$y-xgboost_p_y$p)^2)
+
+#BS 95%CI
+set.seed(201)
+BS=vector(length = 2000)
+for(i in 1:2000)
+{
+  print(i)
+  set.seed(i)
+  ind=sample(nrow(xgboost_p_y),nrow(xgboost_p_y),replace=T)
+  val=xgboost_p_y[ind,]
+  BS[i]<-mean((val$y-val$p)^2)
+}
+
+BS_lower<-quantile(BS,0.025)
+BS_upper<-quantile(BS,0.975)
