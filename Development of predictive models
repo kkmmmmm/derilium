@@ -5,50 +5,52 @@ library(Matrix)
 library(xgboost)
 library(glmnet)
 library(pROC)
+library(PRROC)
 library(CalibrationCurves)
 library(shapviz)
+library(rsample)
 
 #-----------------------------------------------------#
-# imputation of missing values by missforest          #
-#-----------------------------------------------------#
-#factor type conversion
-x$derilium <- as.factor(x$derilium)
-x$Woman <- as.factor(x$Woman)
-x$Emergency.hospitalization <- as.factor(x$Emergency.hospitalization)
-x$Use.of.ambulance <- as.factor(x$Use.of.ambulance)
-x$Taking.benzodiazepines <- as.factor(x$Taking.benzodiazepines)
-x$Taking.opioid.medications <- as.factor(x$Taking.opioid.medications)
-x$Taking.steroid.medications <- as.factor(x$Taking.steroid.medications)
-x$Dementia <- as.factor(x$Dementia)
-x$Brain.tissue.disorder <- as.factor(x$Brain.tissue.disorder)
-x$Heavy.drinker <- as.factor(x$Heavy.drinker)
-x$History.of.delirium <- as.factor(x$History.of.delirium)
-x$Room.at.hospitalization. <- as.factor(x$Room.at.hospitalization.)
-x$central.venous.port <- as.factor(x$central.venous.port)
-x$swan.ganz.catheter <- as.factor(x$swan.ganz.catheter)
-x$ventilator <- as.factor(x$ventilator)
-x$central.venous.catheter <- as.factor(x$central.venous.catheter)
-x$dialysis.catheter <- as.factor(x$dialysis.catheter)
-x$indwelling.urinary.catheter <- as.factor(x$indwelling.urinary.catheter)
-x$peripheral.vein.catheter <- as.factor(x$peripheral.vein.catheter)
-x$physical.restraint <- as.factor(x$physical.restraint)
-x$circadian.rhythm.problems <- as.factor(x$circadian.rhythm.problems)
-x$surgical.site. <- as.factor(x$surgical.site.)
-
-#applying the missforest function
-set.seed(1)
-imp <- missForest(x)
-
-#-----------------------------------------------------#
-# predictive model development                        #
+# data                                                #
 #-----------------------------------------------------#
 #loding data
-x=read.csv("●●.csv",fileEncoding='cp932')
+x=read.csv()
 x$obj=x$derilium
 
 #split derivation cohort and validation cohort
 derivation=x %>% filter(training.or.test=="training")
 validation=x %>% filter(training.or.test=="test")
+#-----------------------------------------------------#
+# imputation of missing values by missforest          #
+#-----------------------------------------------------#
+#factor type conversion
+derivation$derilium <- as.factor(derivation$derilium)
+derivation$Woman <- as.factor(derivation$Woman)
+derivation$Emergency.hospitalization <- as.factor(derivation$Emergency.hospitalization)
+derivation$Use.of.ambulance <- as.factor(derivation$Use.of.ambulance)
+derivation$Taking.benzodiazepines <- as.factor(derivation$Taking.benzodiazepines)
+derivation$Taking.opioid.medications <- as.factor(derivation$Taking.opioid.medications)
+derivation$Taking.steroid.medications <- as.factor(derivation$Taking.steroid.medications)
+derivation$Dementia <- as.factor(derivation$Dementia)
+derivation$Brain.tissue.disorder <- as.factor(derivation$Brain.tissue.disorder)
+derivation$Heavy.drinker <- as.factor(derivation$Heavy.drinker)
+derivation$History.of.delirium <- as.factor(derivation$History.of.delirium)
+derivation$Room.at.hospitalization. <- as.factor(derivation$Room.at.hospitalization.)
+derivation$central.venous.port <- as.factor(derivation$central.venous.port)
+derivation$swan.ganz.catheter <- as.factor(derivation$swan.ganz.catheter)
+derivation$ventilator <- as.factor(derivation$ventilator)
+derivation$central.venous.catheter <- as.factor(derivation$central.venous.catheter)
+derivation$dialysis.catheter <- as.factor(derivation$dialysis.catheter)
+derivation$indwelling.urinary.catheter <- as.factor(derivation$indwelling.urinary.catheter)
+derivation$peripheral.vein.catheter <- as.factor(derivation$peripheral.vein.catheter)
+derivation$physical.restraint <- as.factor(derivation$physical.restraint)
+derivation$circadian.rhythm.problems <- as.factor(derivation$circadian.rhythm.problems)
+derivation$surgical.site. <- as.factor(derivation$surgical.site.)
+
+derivation %>% select(-training.or.test)　
+#applying the missforest function
+set.seed(1)
+derivation <- missForest(derivation)
 
 #--------------------------------------#
 # xgboost               　　　         #
@@ -117,7 +119,6 @@ validation2=validation %>% mutate(obj=as.integer(obj)) %>% ungroup %>% data.fram
 x2 <- model.matrix(obj~.,validation2)　
 #standardization
 x2_std<-data.matrix(scale(x2)) 
-y2 <- validation2$obj
 test.LASSO <- predict(train.LASSO, newx=x2_std,type="response")
 test.LASSO <- as.vector(test.LASSO)
 stats2=val.prob.ci.2(p=roc(validation2$obj,test.LASSO)$predictor,y=roc(validation2$obj,test.LASSO)$response,g=10,CL.BT=T)
@@ -129,6 +130,7 @@ AUC2=data.frame(stats2$Cindex)
 #--------------------------------------#
 #training
 set.seed(1)
+train.glm <-glm(obj~general.anesthesia.time+amount.of.blood.loss+Age+Emergency.hospitalization+Use.of.ambulance+BMI+intensive.care.unit+cerebral.nerves.and.cerebrovascular,family=binomial,data=derivation)
 train.glm <-glm(obj~Age+vital.sign_Glasgow.Coma.Scale+intensive.care.unit+general.anesthesia.time+amount.of.blood.loss,family=binomial,data=derivation)
 
 #test
@@ -145,7 +147,7 @@ AUC2=data.frame(stats2$Cindex)
 
 xgboost_p_y<-data.frame(p=roc(validation2$obj,test.GBDT)$predictor,y=roc(validation2$obj,test.GBDT)$response)
 LASSO_p_y<-data.frame(p=roc(validation2$obj,test.LASSO)$predictor,y=roc(validation2$obj,test.LASSO)$response)
-ML_p_y<-data.frame(p=roc(validation$obj,test.glm)$predictor,y=roc(validation$obj,test.glm)$response)
+glm_p_y<-data.frame(p=roc(validation$obj,test.glm)$predictor,y=roc(validation$obj,test.glm)$response)
 
 #mcc
 cutoff<-coords(roc(xgboost_p_y$y,xgboost_p_y$p), x="best", ret="all", best.method="youden")
@@ -192,3 +194,146 @@ for(i in 1:2000)
 
 BS_lower<-quantile(BS,0.025)
 BS_upper<-quantile(BS,0.975)
+
+#--------------------------------------#
+# Se Sp PPV NPV                        #
+#--------------------------------------#
+
+xgboost_p_y<-data.frame(p=roc(validation2$obj,test.GBDT)$predictor,y=roc(validation2$obj,test.GBDT)$response)
+LASSO_p_y<-data.frame(p=roc(validation2$obj,test.LASSO)$predictor,y=roc(validation2$obj,test.LASSO)$response)
+glm_p_y<-data.frame(p=roc(validation$obj,test.glm)$predictor,y=roc(validation$obj,test.glm)$response)
+
+cutoff1<-coords(roc(xgboost_p_y$y,xgboost_p_y$p), x="best", ret="all", best.method="youden")
+cutoff2<-ci.coords(roc(xgboost_p_y$y,xgboost_p_y$p), x="best", ret="all", best.method="youden")
+
+#Sensitivity
+cutoff1$sensitivity
+cutoff2$sensitivity
+
+#specificity
+cutoff1$specificity
+cutoff2$specificity
+
+#PPV
+cutoff1$ppv
+cutoff2$ppv
+
+#NPV
+cutoff1$npv
+cutoff2$npv
+
+#--------------------------------------#
+# AUPRC                                #
+#--------------------------------------#
+
+xgboost_p_y<-data.frame(p=roc(validation2$obj,test.GBDT)$predictor,y=roc(validation2$obj,test.GBDT)$response)
+LASSO_p_y<-data.frame(p=roc(validation2$obj,test.LASSO)$predictor,y=roc(validation2$obj,test.LASSO)$response)
+glm_p_y<-data.frame(p=roc(validation$obj,test.glm)$predictor,y=roc(validation$obj,test.glm)$response)
+
+#AUPRC
+AUPRC<-pr.curve(scores.class0 = glm_p_y$p, weights.class0 = glm_p_y$y, curve = TRUE)$auc.integral
+
+#AUPRC 95%CI
+set.seed(201)
+AUPRC=vector(length = 2000)
+for(i in 1:2000)
+{
+  print(i)
+  set.seed(i)
+  ind=sample(nrow(glm_p_y),nrow(glm_p_y),replace=T)
+  val=glm_p_y[ind,]
+  AUPRC[i]<-pr.curve(scores.class0 = val$p, weights.class0 = val$y, curve = TRUE)$auc.integral
+}
+
+AUPRC_lower<-quantile(AUPRC,0.025)
+AUPRC_upper<-quantile(AUPRC,0.975)
+
+
+#-----------------------------------------------------#
+# Internal Validation                                 #
+#-----------------------------------------------------#
+#--------------------------------------#
+# xgboost               　　　         #
+#--------------------------------------#
+set.seed(1)
+AUROC_xgboost=vector(length = 5) 
+flg<-lapply(x,class)=="character"
+x[,flg]<-lapply(x[,flg],as.factor)
+derivation2<-x %>% mutate(obj=as.integer(obj)) %>% ungroup %>% data.frame %>% select(-derilium)　
+folds1 <- vfold_cv(derivation2, v = 5, strata = "obj") 
+for(i in 1:5){
+  print(i)
+  set.seed(i)
+  derivation3=analysis(folds1$splits[[i]])
+  validation3=assessment(folds1$splits[[i]])
+  options(na.action = na.pass)
+  data=model.matrix(obj~.-1,derivation3,contrasts.arg=lapply(derivation3[sapply(derivation3,is.factor)],contrasts,contrasts=FALSE))
+  ddat<-xgb.DMatrix(data, label=as.integer(derivation3$obj))
+  data3=model.matrix(obj~.-1,validation3,contrasts.arg=lapply(validation3[sapply(validation3,is.factor)],contrasts,contrasts=FALSE))
+  dtest<-xgb.DMatrix(data3, label=as.integer(validation3$obj))
+  tuning=data.frame()
+  for(q in 1:10)
+  {
+    print(q)
+    set.seed(q)
+    param<-list(objective="binary:logistic",eval_metric="auc",max.depth=q,eta=0.1)
+    cv=xgb.cv(param=param,data=ddat,nrounds=500,nfold=5,early_stopping_rounds = 5)
+    testauc=data.frame(cv$evaluation_log$test_auc_mean[cv$best_iteration],cv$best_iteration) %>% mutate(variable=rownames(.),no=q)
+    tuning=bind_rows(tuning,testauc)}
+  param2<-list(objective="binary:logistic",eval_metric="auc",max.depth=which.max(tuning$cv.evaluation_log.test_auc_mean.cv.best_iteration.),eta=0.1)
+  train.GBDT <-xgboost(params=param2, data=ddat, nrounds=tuning$cv.best_iteration[which.max(tuning$cv.evaluation_log.test_auc_mean.cv.best_iteration.)],verbose = 0)
+  test.GBDT <- predict(train.GBDT,dtest)
+  AUROC_xgboost[i]=roc(validation3$obj,test.GBDT)$auc}
+
+#Output AUROC, sensitivity specificity and calibration results to PC
+write.csv(AUROC_xgboost,"C:/Users/OWNER/AUROC_xgboost.csv")
+
+#--------------------------------------#
+# LASSO                 　　　         #
+#--------------------------------------#
+set.seed(1)
+AUROC_lasso=vector(length = 5) 
+derivation2<-x %>% mutate(obj=as.factor(obj)) %>% ungroup %>% data.frame %>% select(-derilium)
+folds1 <- vfold_cv(derivation2, v = 5, strata = "obj")
+for(i in 1:5){
+  print(i)
+  set.seed(i)
+  derivation3=analysis(folds1$splits[[i]])
+  validation3=assessment(folds1$splits[[i]])
+  x1 <- model.matrix(obj~.,derivation3)
+  y <- derivation3$obj
+  cvfit <- cv.glmnet(x=x1, y=y,alpha=1, family="binomial",nfolds = 10, standardize=T)
+  train.LASSO <-glmnet(x=x1, y=y,alpha=1, family="binomial", lambda = cvfit$lambda.min, standardize=T)
+  x2 <- model.matrix(obj~.,validation3)
+  test.LASSO <- predict(train.LASSO, newx=x2,type="response", standardize=T)
+  test.LASSO <- as.vector(test.LASSO)
+  AUROC_lasso[i]=roc(validation3$obj, test.LASSO)$auc}
+
+#Output AUROC, sensitivity specificity and calibration results to PC
+write.csv(AUROC_lasso,"C:/Users/OWNER/AUROC_lasso.csv")
+
+#--------------------------------------#
+# ML-referenced LR        　　         #
+#--------------------------------------#
+
+#selection model
+train.glm <-glm(obj~general.anesthesia.time+amount.of.blood.loss+Age+Emergency.hospitalization+Use.of.ambulance+BMI+intensive.care.unit+cerebral.nerves.and.cerebrovascular,family=binomial,data=derivation)
+train.glm <-glm(obj~Age+vital.sign_Glasgow.Coma.Scale+intensive.care.unit+general.anesthesia.time+amount.of.blood.loss,family=binomial,data=derivation)
+
+#model developed
+set.seed(1)
+AUROC_glm=vector(length = 5) 
+derivation2<-x %>% mutate(obj=as.factor(obj)) %>% ungroup %>% data.frame %>% select(-derilium)
+folds1 <- vfold_cv(derivation2, v = 5, strata = "obj")
+for(i in 1:5){
+  print(i)
+  set.seed(i)
+  derivation3=analysis(folds1$splits[[i]])
+  validation3=assessment(folds1$splits[[i]])
+  train.glm <-glm(obj~Age+vital.sign_Glasgow.Coma.Scale+intensive.care.unit+general.anesthesia.time+amount.of.blood.loss,family=binomial,data=derivation3)
+  test.glm <- predict(train.glm,validation3,type="response")
+  test.glm <- as.vector(test.glm)
+  AUROC_glm[i]=roc(validation3$obj, test.glm)$auc}
+
+#Output AUROC, sensitivity specificity and calibration results to PC
+write.csv(AUROC_glm,"C:/Users/OWNER/AUROC_glm.csv")
